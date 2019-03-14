@@ -1,6 +1,7 @@
 package prefix
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 )
@@ -9,6 +10,9 @@ import (
 type Node struct {
 	// root это ссылка на первый элемент в адресе
 	root *Node
+
+	// Parent это ссылка на вышестоящий элемент в адресе
+	Parent *Node
 
 	// Path это адрес
 	Path []byte
@@ -46,6 +50,7 @@ func New(
 }
 
 // Node добавляет потомка
+// осторожно, эта функция только для тестов (внутри panic)
 func (n *Node) Node(
 	path string,
 	nodeType ...Type,
@@ -54,9 +59,21 @@ func (n *Node) Node(
 	if len(nodeType) > 0 {
 		nType = nodeType[0]
 	}
+	switch {
+	case n.Type == CatchAll:
+		panic("CatchAll нельзя продолжать")
+	case path == "":
+		panic("empty path")
+	case n.Type == Param && path[0] != '/':
+		panic("expected '/' or end")
+	case n.Type == Param && nType == Param:
+		panic("double param")
+	}
+
 	child := &Node{
-		Path: []byte(path),
-		Type: nType,
+		Path:   []byte(path),
+		Type:   nType,
+		Parent: n,
 	}
 	if n.root != nil {
 		child.root = n.root
@@ -112,6 +129,7 @@ func (n *Node) Insert(
 	} else {
 		node.root = n
 	}
+	node.Parent = n
 	switch {
 	case prefix > len(path):
 		return nil, fmt.Errorf(
@@ -126,4 +144,89 @@ func (n *Node) Insert(
 		n.Children = save
 	}
 	return lastNode, err
+}
+
+// Childrens возвращает потомков определённого типа
+func (n *Node) Childrens(nType Type) []*Node {
+	if len(n.Children) == 0 {
+		return []*Node{}
+	}
+	result := make([]*Node, len(n.Children))
+	var i int
+	for _, node := range n.Children {
+		if node.Type == nType {
+			result[i] = node
+			i++
+		}
+	}
+	return result[:i]
+}
+
+// String возвращает адрес ноды
+// todo: функция не безопасна для замыкания - это надо поправить
+func (n *Node) String() string {
+	var title string
+	switch n.Type {
+	case Root:
+		title = "^" + string(n.Path)
+	case Param:
+		title = ":" + string(n.Path)
+	case CatchAll:
+		title = "*" + string(n.Path)
+	case Static:
+		title = "[" + string(n.Path) + "]"
+	default:
+		title = "???" + string(n.Path)
+	}
+	if n.Parent != nil {
+		return n.Parent.String() + title
+	}
+	return title
+}
+
+// Get возвращает первое полное вхождение адреса
+// Static ноды имеют приоритет перед Param
+// Param ноды имеют приоритет над CatchAll
+func (n *Node) Get(path []byte) (v *Node, err error) {
+	//	fmt.Printf("\n%s -> %s\n", n.String(), string(path))
+	prefix := len(path)
+	for _, node := range n.Childrens(Static) {
+		switch {
+		case prefix < len(node.Path):
+			continue
+		case bytes.Compare(path[:len(node.Path)], node.Path) != 0:
+			continue
+		case prefix == len(node.Path):
+			return node, nil
+		}
+		// ищем первое полное вхождение адреса
+		v, err := node.Get(path[len(node.Path):])
+		if err == nil {
+			return v, nil
+		}
+	}
+	// в Static не нашли, начинаем искать по параметрам
+	// случай когда весь path это значение параметра
+	slash := bytes.IndexAny(path, "/")
+	if slash < 0 {
+		for _, node := range n.Childrens(Param) {
+			if node.Value != nil {
+				return node, nil
+			}
+		}
+		for _, node := range n.Childrens(CatchAll) {
+			return node, nil
+		}
+		return nil, errors.New("not found")
+	}
+	for _, node := range n.Childrens(Param) {
+		v, err := node.Get(path[slash:])
+		if err == nil {
+			return v, nil
+		}
+	}
+	for _, node := range n.Childrens(CatchAll) {
+		return node, nil
+	}
+	return nil, errors.New("not found")
 }
