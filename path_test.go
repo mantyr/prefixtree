@@ -8,6 +8,80 @@ import (
 	. "github.com/smartystreets/goconvey/convey"
 )
 
+func TestNodes(t *testing.T) {
+	Convey("Проверяем разворачивание path в набор Nodes", t, func() {
+		tests := []struct {
+			path          string
+			expectedPath  string
+			expectedError error
+		}{
+			{
+				path:          "/path/:dir/*filepath",
+				expectedPath:  "[/path/]:dir[/]*filepath",
+				expectedError: nil,
+			},
+			{
+				path:          "/path/user_:user",
+				expectedPath:  "[/path/user_]:user",
+				expectedError: nil,
+			},
+			{
+				path:          "/path/user_:user/id",
+				expectedPath:  "[/path/user_]:user[/id]",
+				expectedError: nil,
+			},
+			{
+				path:          "/path/user_:user/id/:id",
+				expectedPath:  "[/path/user_]:user[/id/]:id",
+				expectedError: nil,
+			},
+			{
+				path:          "/id:id:name",
+				expectedError: errors.New("expected '/' or end path but actual ':' or '*'"),
+			},
+			{
+				path:          "/id:",
+				expectedError: errors.New("empty param name"),
+			},
+			{
+				path:          "/id:/",
+				expectedError: errors.New("empty param name"),
+			},
+			{
+				path:          "/id/*",
+				expectedError: errors.New("empty param name"),
+			},
+		}
+		for n, test := range tests {
+			Convey(fmt.Sprintf("#%d", n), func() {
+				Printf("\n\tpath: %s\n", test.path)
+
+				node, err := Nodes([]byte(test.path))
+
+				if test.expectedError != nil {
+					Printf("\tfind: %s\n\t", test.expectedError.Error())
+					So(err, ShouldNotBeNil)
+					So(
+						err.Error(),
+						ShouldEqual,
+						test.expectedError.Error(),
+					)
+					So(node, ShouldBeNil)
+				} else {
+					Printf("\tfind: %s\n\t", test.expectedPath)
+					So(err, ShouldBeNil)
+					So(node, ShouldNotBeNil)
+					So(
+						node.String(),
+						ShouldResemble,
+						test.expectedPath,
+					)
+				}
+			})
+		}
+	})
+}
+
 func TestFirst(t *testing.T) {
 	Convey("Проверяем определение первой ноды в адресе", t, func() {
 		tests := []struct {

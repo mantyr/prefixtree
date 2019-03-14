@@ -103,47 +103,188 @@ func (n *Node) Root() *Node {
 	return root
 }
 
-// Insert добавляет цепочку потомков на основе адреса
+// Len возвращает длину исходного шаблона
+func (n *Node) Len() int {
+	switch n.Type {
+	case Param, CatchAll:
+		return len(n.Path) + 1
+	}
+	return len(n.Path)
+}
+
+// Insert добавляет цепочку потомков на основе адреса и возвращает последний элемент
 func (n *Node) Insert(
 	path []byte,
 ) (
 	lastNode *Node,
 	err error,
 ) {
-	if len(path) == 0 {
-		return nil, errors.New("empty path")
-	}
-	node, err := First(path)
+	save := n.Children
+
+	lastNode, err = Nodes(path)
 	if err != nil {
 		return nil, err
 	}
-	prefix := len(node.Path)
-	switch node.Type {
-	case Param, CatchAll:
-		prefix++
+	root := lastNode.Root()
+	if root == nil {
+		return nil, errors.New("empty root")
 	}
-	save := n.Children
-	n.Children = append(n.Children, node)
-	if n.root != nil {
-		node.root = n.root
-	} else {
-		node.root = n
-	}
-	node.Parent = n
-	switch {
-	case prefix > len(path):
-		return nil, fmt.Errorf(
-			"unexpected error: long node.Path, actual %s",
-			string(node.Path),
-		)
-	case prefix == len(path):
-		return node, nil
-	}
-	lastNode, err = node.Insert(path[prefix:])
+	node, err := n.Glue(root)
 	if err != nil {
 		n.Children = save
+		return nil, err
 	}
-	return lastNode, err
+	if node != nil {
+		// в дереве нашлось точно такая же ветка
+		return node, nil
+	}
+	return lastNode, nil
+}
+
+// Glue склеивает дерево с цепочкой,
+// возвращает последнюю ноду если произошло полное совпадение
+func (n *Node) Glue(
+	node *Node,
+) (
+	lastNode *Node,
+	err error,
+) {
+	switch {
+	case n.Type == CatchAll:
+		return nil, errors.New("last node CatchAll")
+	case node.Type == CatchAll && node.WildChild:
+		return nil, errors.New("CatchAll excludes Children")
+	}
+	switch node.Type {
+	case Static:
+		max, child := n.ChildIdentic(node.Path)
+		if child != nil {
+			switch {
+			case bytes.Equal(child.Path, node.Path):
+				if !node.WildChild {
+					return child, nil //errors.New("Static already exists")
+				}
+				return child.Glue(node.Children[0])
+			case len(child.Path) > max && len(node.Path) > max:
+				_, err = child.Cut(max)
+				if err != nil {
+					return nil, err
+				}
+				node, err = child.Cut(max)
+				if err != nil {
+					return nil, err
+				}
+				child.Children = append(child.Children, node)
+				node.SetRoot(child.Root())
+				node.Parent = child
+				return nil, nil
+			case len(child.Path) > max:
+				_, err = child.Cut(max)
+				if err != nil {
+					return nil, err
+				}
+				if !node.WildChild {
+					return child, nil //errors.New("Static already exists")
+				}
+				node = node.Children[0]
+				child.Children = append(child.Children, node)
+
+				node.SetRoot(child.Root())
+				node.Parent = child
+				return nil, nil
+			case len(node.Path) > max:
+				node, err := node.Cut(max)
+				if err != nil {
+					return nil, err
+				}
+				return child.Glue(node)
+			}
+		}
+	case Param:
+		if n.Type == Param {
+			return nil, errors.New("expected Static but actual Param")
+		}
+		for _, child := range n.Childrens(Param) {
+			if bytes.Equal(node.Path, child.Path) {
+				if !node.WildChild {
+					return child, errors.New("Param already exists")
+				}
+				return child.Glue(node.Children[0])
+			}
+		}
+	case CatchAll:
+		for _, child := range n.Childrens(CatchAll) {
+			return child, nil //errors.New("CatchAll already exists")
+		}
+	}
+	n.Children = append(n.Children, node)
+	node.SetRoot(n.Root())
+	node.Parent = n
+	return nil, nil
+}
+
+// Cut обрезает ноду на две части
+func (n *Node) Cut(
+	max int,
+) (
+	child *Node,
+	err error,
+) {
+	switch {
+	case max < 1:
+		return nil, fmt.Errorf("expected max > 0 but actual %d", max)
+	case n.Type != Static:
+		return nil, fmt.Errorf("expected node type Static but actual %d", n.Type)
+	case len(n.Path) < max:
+		return nil, errors.New("expected len n.Path > max but actual n.Path < max")
+	case len(n.Path) == max:
+		return n, nil
+	}
+	child = &Node{
+		root:     n.root,
+		Parent:   n,
+		Path:     n.Path[max:],
+		Type:     Static,
+		Children: n.Children,
+	}
+	n.Path = n.Path[:max]
+	n.Children = []*Node{child}
+	return child, nil
+}
+
+// SetRoot устанавливает ссылку на корневую ноду по всей цепочке
+func (n *Node) SetRoot(root *Node) {
+	n.root = root
+	for _, node := range n.Children {
+		node.SetRoot(root)
+	}
+}
+
+// Identic возвращает количество совпадающих байт от начала адреса
+func (n *Node) Identic(path []byte) (i int) {
+	for i = 0; i < len(n.Path) && i < len(path); i++ {
+		if n.Path[i] != path[i] {
+			return i
+		}
+	}
+	return i
+}
+
+// ChildIdentic возвращает ноду с максимальным совпадением
+func (n *Node) ChildIdentic(
+	path []byte,
+) (
+	max int,
+	node *Node,
+) {
+	for _, child := range n.Childrens(Static) {
+		identic := child.Identic(path)
+		if identic > max {
+			node = child
+			max = identic
+		}
+	}
+	return max, node
 }
 
 // Childrens возвращает потомков определённого типа
@@ -194,7 +335,7 @@ func (n *Node) Get(path []byte) (v *Node, err error) {
 		switch {
 		case prefix < len(node.Path):
 			continue
-		case bytes.Compare(path[:len(node.Path)], node.Path) != 0:
+		case !bytes.HasPrefix(path[:len(node.Path)], node.Path):
 			continue
 		case prefix == len(node.Path):
 			return node, nil
@@ -229,4 +370,14 @@ func (n *Node) Get(path []byte) (v *Node, err error) {
 		return node, nil
 	}
 	return nil, errors.New("not found")
+}
+
+// Set устанавливает значение по адресу
+func (n *Node) Set(path []byte, v interface{}) error {
+	lastNode, err := n.Insert(path)
+	if err != nil {
+		return err
+	}
+	lastNode.Value = v
+	return nil
 }

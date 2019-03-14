@@ -11,45 +11,28 @@ import (
 func TestInsert(t *testing.T) {
 	Convey("Проверяем вставку адреса", t, func() {
 		tests := []struct {
-			path             string
-			expected         *Node
-			expectedLastNode *Node
-			expectedError    error
+			path          string
+			expectedPath  string
+			expectedError error
 		}{
 			{
-				path:     "/path/:dir/*filepath",
-				expected: New("", Root).Node("/path/").Param("dir").Node("/").All("filepath"),
-				expectedLastNode: &Node{
-					Path: []byte("filepath"),
-					Type: CatchAll,
-				},
+				path:          "/path/:dir/*filepath",
+				expectedPath:  "^[/path/]:dir[/]*filepath",
 				expectedError: nil,
 			},
 			{
-				path:     "/path/user_:user",
-				expected: New("", Root).Node("/path/user_").Param("user"),
-				expectedLastNode: &Node{
-					Path: []byte("user"),
-					Type: Param,
-				},
+				path:          "/path/user_:user",
+				expectedPath:  "^[/path/user_]:user",
 				expectedError: nil,
 			},
 			{
-				path:     "/id/:id",
-				expected: New("", Root).Node("/id/").Param("id"),
-				expectedLastNode: &Node{
-					Path: []byte("id"),
-					Type: Param,
-				},
+				path:          "/id/:id",
+				expectedPath:  "^[/id/]:id",
 				expectedError: nil,
 			},
 			{
-				path:     "/id:id",
-				expected: New("", Root).Node("/id").Param("id"),
-				expectedLastNode: &Node{
-					Path: []byte("id"),
-					Type: Param,
-				},
+				path:          "/id:id",
+				expectedPath:  "^[/id]:id",
 				expectedError: nil,
 			},
 			{
@@ -57,11 +40,8 @@ func TestInsert(t *testing.T) {
 				expectedError: errors.New("expected '/' or end path but actual ':' or '*'"),
 			},
 			{
-				path:     ":id/:name/123",
-				expected: New("", Root).Param("id").Node("/").Param("name").Node("/123"),
-				expectedLastNode: &Node{
-					Path: []byte("/123"),
-				},
+				path:          ":id/:name/123",
+				expectedPath:  "^:id[/]:name[/123]",
 				expectedError: nil,
 			},
 			{
@@ -81,31 +61,25 @@ func TestInsert(t *testing.T) {
 				expectedError: errors.New("expected '/' or end path but actual ':' or '*'"),
 			},
 		}
-		for _, test := range tests {
-			title := test.path
-			if test.expectedError != nil {
-				title = fmt.Sprintf(
-					"%s - %s",
-					test.path,
-					test.expectedError.Error(),
-				)
-			}
-			Convey(title, func() {
+		for n, test := range tests {
+			Convey(fmt.Sprintf("#%d", n), func() {
+				Printf("\n\tpath: %s\n", test.path)
+
 				root := &Node{
 					Path: []byte{},
 					Type: Root,
 				}
-				lastNode, err := root.Insert([]byte(test.path))
-				So(root.root, ShouldBeNil)
+				node, err := root.Insert([]byte(test.path))
 
 				if test.expectedError != nil {
+					Printf("\tfind: %s\n\t", test.expectedError.Error())
 					So(err, ShouldNotBeNil)
 					So(
 						err.Error(),
 						ShouldEqual,
 						test.expectedError.Error(),
 					)
-					So(lastNode, ShouldBeNil)
+					So(node, ShouldBeNil)
 					So(
 						root,
 						ShouldResemble,
@@ -115,26 +89,27 @@ func TestInsert(t *testing.T) {
 						},
 					)
 				} else {
+					Printf("\tfind: %s\n\t", test.expectedPath)
 					So(err, ShouldBeNil)
-					So(lastNode, ShouldNotBeNil)
+					So(node, ShouldNotBeNil)
 					So(
-						string(lastNode.Path),
-						ShouldEqual,
-						string(test.expectedLastNode.Path),
+						node.String(),
+						ShouldResemble,
+						test.expectedPath,
+					)
+					So(node.root, ShouldNotBeNil)
+					So(
+						node.Root().String(),
+						ShouldResemble,
+						root.String(),
 					)
 					So(
+						node.Root(),
+						ShouldResemble,
 						root,
-						ShouldResemble,
-						test.expected.Root(),
-					)
-					lastNode.root = nil
-					lastNode.Parent = nil
-					So(
-						lastNode,
-						ShouldResemble,
-						test.expectedLastNode,
 					)
 				}
+				So(root.root, ShouldBeNil)
 			})
 		}
 	})

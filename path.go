@@ -5,6 +5,29 @@ import (
 	"errors"
 )
 
+// Nodes разворачивает path в цепочку Node и возвращает последний элемент
+func Nodes(path []byte) (*Node, error) {
+	root, err := First(path)
+	if err != nil {
+		return nil, err
+	}
+	next := root
+	path = path[next.Len():]
+	for len(path) > 0 {
+		child, err := First(path)
+		if err != nil {
+			return nil, err
+		}
+		next.Children = []*Node{child}
+		next.WildChild = true
+		child.root = root
+		child.Parent = next
+		next = child
+		path = path[next.Len():]
+	}
+	return next, nil
+}
+
 // First возвращает первую ноду в адресе
 func First(
 	path []byte,
