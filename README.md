@@ -2,7 +2,7 @@
 
 [![Build Status](https://travis-ci.org/mantyr/prefixtree.svg?branch=master)](https://travis-ci.org/mantyr/prefixtree)
 [![GoDoc](https://godoc.org/github.com/mantyr/prefixtree?status.png)](http://godoc.org/github.com/mantyr/prefixtree)
-[![Go Report Card](https://goreportcard.com/badge/github.com/mantyr/prefixtree?v=3)][goreport]
+[![Go Report Card](https://goreportcard.com/badge/github.com/mantyr/prefixtree?v=4)][goreport]
 [![Software License](https://img.shields.io/badge/license-MIT-brightgreen.svg)](LICENSE.md)
 
 This stable version
