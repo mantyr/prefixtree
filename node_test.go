@@ -1,4 +1,4 @@
-package prefix
+package prefixtree
 
 import (
 	"errors"
@@ -8,223 +8,179 @@ import (
 	. "github.com/smartystreets/goconvey/convey"
 )
 
-func TestInsert(t *testing.T) {
-	Convey("Проверяем вставку адреса", t, func() {
-		tests := []struct {
-			path          string
-			expectedPath  string
-			expectedError error
-		}{
-			{
-				path:          "/path/:dir/*filepath",
-				expectedPath:  "^[/path/]:dir[/]*filepath",
-				expectedError: nil,
-			},
-			{
-				path:          "/path/user_:user",
-				expectedPath:  "^[/path/user_]:user",
-				expectedError: nil,
-			},
-			{
-				path:          "/id/:id",
-				expectedPath:  "^[/id/]:id",
-				expectedError: nil,
-			},
-			{
-				path:          "/id:id",
-				expectedPath:  "^[/id]:id",
-				expectedError: nil,
-			},
-			{
-				path:          "/id:id:name",
-				expectedError: errors.New("expected '/' or end path but actual ':' or '*'"),
-			},
-			{
-				path:          ":id/:name/123",
-				expectedPath:  "^:id[/]:name[/123]",
-				expectedError: nil,
-			},
-			{
-				path:          ":/",
-				expectedError: errors.New("empty param name"),
-			},
-			{
-				path:          ":",
-				expectedError: errors.New("empty param name"),
-			},
-			{
-				path:          "::",
-				expectedError: errors.New("empty param name"),
-			},
-			{
-				path:          ":id:name/123",
-				expectedError: errors.New("expected '/' or end path but actual ':' or '*'"),
-			},
-		}
-		for n, test := range tests {
-			Convey(fmt.Sprintf("#%d", n), func() {
-				Printf("\n\tpath: %s\n", test.path)
-
-				root := &Node{
-					Path: []byte{},
-					Type: Root,
-				}
-				node, err := root.Insert([]byte(test.path))
-
-				if test.expectedError != nil {
-					Printf("\tfind: %s\n\t", test.expectedError.Error())
-					So(err, ShouldNotBeNil)
-					So(
-						err.Error(),
-						ShouldEqual,
-						test.expectedError.Error(),
-					)
-					So(node, ShouldBeNil)
-					So(
-						root,
-						ShouldResemble,
-						&Node{
-							Path: []byte{},
-							Type: Root,
-						},
-					)
-				} else {
-					Printf("\tfind: %s\n\t", test.expectedPath)
-					So(err, ShouldBeNil)
-					So(node, ShouldNotBeNil)
-					So(
-						node.String(),
-						ShouldResemble,
-						test.expectedPath,
-					)
-					So(node.root, ShouldNotBeNil)
-					So(
-						node.Root().String(),
-						ShouldResemble,
-						root.String(),
-					)
-					So(
-						node.Root(),
-						ShouldResemble,
-						root,
-					)
-				}
-				So(root.root, ShouldBeNil)
-			})
-		}
-	})
+// testSetValue проверяет вставку в дерево
+func testSetValue(
+	root *Node,
+	path string,
+	value string,
+	expectedError error,
+) {
+	err := root.SetString(path, value)
+	if expectedError != nil {
+		Convey(fmt.Sprintf("\t%s - (error)", path), func() {
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldEqual, expectedError.Error())
+		})
+	} else {
+		Convey(fmt.Sprintf("\t%s", path), func() {
+			So(err, ShouldBeNil)
+		})
+	}
 }
 
-func TestGet(t *testing.T) {
-	Convey("Проверяем получение значения по адресу", t, func() {
-		root := New("", Root)
+// testGetValue проверяет получение данных из дерева
+func testGetValue(
+	root *Node,
+	path string,
+	expectedError error,
+	expectedValue interface{},
+	expectedParams map[string]string,
+) {
+	value, err := root.GetString(path)
+	if expectedError != nil {
+		Convey(fmt.Sprintf("%s - (error)", path), func() {
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldEqual, expectedError.Error())
+		})
+	} else {
+		Convey(path, func() {
+			So(err, ShouldBeNil)
+			So(value, ShouldNotBeNil)
+			So(value.Value, ShouldNotBeNil)
+			So(
+				value.Value,
+				ShouldResemble,
+				expectedValue,
+			)
+			So(value.Params, ShouldNotBeNil)
+			So(
+				value.Params,
+				ShouldResemble,
+				expectedParams,
+			)
+		})
+	}
+}
 
-		node1 := root.Node("/path/")
-		node2 := node1.Param("dir").Node("/")
-		So(node2.String(), ShouldEqual, "^[/path/]:dir[/]")
+func TestNode(t *testing.T) {
+	Convey("Проверяем вставку в дерево", t, func() {
+		root := New()
+		So(root, ShouldNotBeNil)
+		So(root.Type, ShouldEqual, Root)
 
-		node3 := node2.All("filepath")
-		node3.Value = "tree1"
-		So(node3.String(), ShouldEqual, "^[/path/]:dir[/]*filepath")
+		testSetValue(root, "/path/:dir/123", "value1", nil)
+		testSetValue(root, "/path/:dir/*filepath", "value2", nil)
+		testSetValue(root, "/path/user_:user", "value3", nil)
+		testSetValue(root, "/id/:id", "value4", nil)
+		testSetValue(root, "/id:id", "value5", nil)
+		testSetValue(root, ":id/:name/123", "value6", nil)
+		testSetValue(root, "/id:id", "value7", errors.New("path already in use"))
+		testSetValue(root, "/id:id2", "value8", nil)
 
-		node4 := node2.Node("123")
-		node4.Value = "tree2"
-		// данный маршрут перебивает предыдущий если адрес файла 123
-		So(node4.String(), ShouldEqual, "^[/path/]:dir[/][123]")
-
-		node5 := node2.Node("file2.zip")
-		node5.Value = "tree3"
-		// данный маршрут перебивает предыдущий если адрес файла file2.zip
-		So(node5.String(), ShouldEqual, "^[/path/]:dir[/][file2.zip]")
-
-		node6 := node1.Node("user_").Param("user")
-		node6.Value = "tree4"
-		So(node6.String(), ShouldEqual, "^[/path/][user_]:user")
-
-		node7 := root.Node("/id")
-		node8 := node7.Node("/").Param("id")
-		node8.Value = "tree5"
-		So(node8.String(), ShouldEqual, "^[/id][/]:id")
-
-		node9 := node7.Param("id")
-		node9.Value = "tree6"
-		So(node9.String(), ShouldEqual, "^[/id]:id")
-
-		tests := []struct {
-			path          string
-			expectedPath  string
-			expectedValue string
-			expectedError error
-		}{
-			{
-				path:          "/path/123/file1.zip",
-				expectedPath:  "^[/path/]:dir[/]*filepath",
-				expectedValue: "tree1",
-				expectedError: nil,
-			},
-			{
-				path:          "/path/123/123",
-				expectedPath:  "^[/path/]:dir[/][123]",
-				expectedValue: "tree2",
-				expectedError: nil,
-			},
-			{
-				path:          "/path/123/file2.zip",
-				expectedPath:  "^[/path/]:dir[/][file2.zip]",
-				expectedValue: "tree3",
-				expectedError: nil,
-			},
-			{
-				path:          "/path/123/123/123/file.zip",
-				expectedPath:  "^[/path/]:dir[/]*filepath",
-				expectedValue: "tree1",
-				expectedError: nil,
-			},
-			{
-				path:          "/path/test123",
-				expectedError: errors.New("not found"),
-			},
-			{
-				path:          "path/123/file.zip",
-				expectedError: errors.New("not found"),
-			},
-			{
-				path:          "/id/123",
-				expectedPath:  "^[/id][/]:id",
-				expectedValue: "tree5",
-				expectedError: nil,
-			},
-		}
-		for n, test := range tests {
-			Convey(fmt.Sprintf("#%d", n), func() {
-				Printf("\n\tpath: %s\n", test.path)
-
-				node, err := root.Get([]byte(test.path))
-				if test.expectedError != nil {
-					Printf("\tfind: %s\n\t", test.expectedError.Error())
-					So(err, ShouldNotBeNil)
-					So(
-						err.Error(),
-						ShouldEqual,
-						test.expectedError.Error(),
-					)
-					So(node, ShouldBeNil)
-				} else {
-					Printf("\tfind: %s\n\t", test.expectedPath)
-					So(err, ShouldBeNil)
-					So(node, ShouldNotBeNil)
-					So(
-						node.String(),
-						ShouldResemble,
-						test.expectedPath,
-					)
-					So(
-						node.Value,
-						ShouldResemble,
-						test.expectedValue,
-					)
-				}
+		Convey("Проверяем содержимое дерева", func() {
+			So(
+				View(root),
+				ShouldResemble,
+				[]string{
+					"^[/][path/]:dir[/][123]=value1", // а куда потерялся /123 ?
+					"^[/][path/]:dir[/]*filepath=value2",
+					"^[/][path/][user_]:user=value3",
+					"^[/][id][/]:id=value4",
+					"^[/][id]:id=value5",
+					"^[/][id]:id2=value8",
+					"^:id[/]:name[/123]=value6",
+				},
+			)
+		})
+		Convey("Проверяем получение данных из дерева", func() {
+			Convey("Нет данных", func() {
+				testGetValue(root, "/", errors.New("not found"), nil, nil)
+				testGetValue(root, "/path", errors.New("not found"), nil, nil)
+				testGetValue(root, "/path/", errors.New("not found"), nil, nil)
+				testGetValue(root, ":id", errors.New("not found"), nil, nil)
 			})
-		}
+			Convey("Данные найдены", func() {
+				testGetValue(
+					root,
+					"/path/123/123",
+					nil,
+					"value1",
+					map[string]string{
+						"dir": "123",
+					},
+				)
+				testGetValue(
+					root,
+					"/path/test/123",
+					nil,
+					"value1",
+					map[string]string{
+						"dir": "test",
+					},
+				)
+				testGetValue(
+					root,
+					"/path/path/123",
+					nil,
+					"value1",
+					map[string]string{
+						"dir": "path",
+					},
+				)
+				testGetValue(
+					root,
+					"/path/:id/123",
+					nil,
+					"value1",
+					map[string]string{
+						"dir": ":id",
+					},
+				)
+				testGetValue(
+					root,
+					"/path/:id/123/dir/file.zip",
+					nil,
+					"value2",
+					map[string]string{
+						"dir":      ":id",
+						"filepath": "123/dir/file.zip",
+					},
+				)
+				testGetValue(
+					root,
+					"/path/user_123",
+					nil,
+					"value3",
+					map[string]string{
+						"user": "123",
+					},
+				)
+				testGetValue(
+					root,
+					"/path/user_123/",
+					errors.New("not found"),
+					nil,
+					nil,
+				)
+				testGetValue(
+					root,
+					"/id/123",
+					nil,
+					"value4",
+					map[string]string{
+						"id": "123",
+					},
+				)
+				testGetValue(
+					root,
+					"/id123",
+					nil,
+					"value5",
+					map[string]string{
+						"id": "123",
+					},
+				)
+			})
+		})
 	})
 }
