@@ -2,84 +2,100 @@ package prefixtree
 
 import (
 	"bytes"
-	"errors"
-	"fmt"
 	"io"
 )
 
 // Перечень видов токена
 const (
-	Root = iota
-	Static
-	CatchAll
-	Param
+	rootToken tokenKind = iota
+	staticToken
+	catchAllToken
+	paramToken
 )
 
-// TokenType это тип токена
-type TokenType uint8
+// tokenKind это тип токена
+type tokenKind uint8
 
-// Token это самостоятельная единица
-type Token struct {
-	// Type это тип токена
-	Type TokenType
+// pathToken это самостоятельная единица
+type pathToken struct {
+	// kind это тип токена
+	kind tokenKind
 
-	// Title это название токена
-	Title []byte
+	// title это название токена
+	title []byte
 }
 
-// Tokens это набор токенов
-type Tokens []Token
+// pathTokens это набор токенов
+type pathTokens []pathToken
 
-// String реализует интерфейс fmt.Stringer
-func (t *Tokens) String() string {
+// checkParamNames проверяет что имена paramToken и catchAllToken не повторяются в одном шаблоне
+func (t pathTokens) checkParamNames() error {
+	for i, token := range t {
+		if token.kind != paramToken && token.kind != catchAllToken {
+			continue
+		}
+		for _, next := range t[i+1:] {
+			if next.kind != paramToken && next.kind != catchAllToken {
+				continue
+			}
+			if bytes.Equal(token.title, next.title) {
+				return newError(DuplicateParamInPath, `duplicate param "%s"`, token.title)
+			}
+		}
+	}
+	return nil
+}
+
+// view возвращает текстовое представление набора токенов
+func (t *pathTokens) view() string {
 	var title string
-	for _, token := range []Token(*t) {
-		title = title + token.String()
+	for _, token := range []pathToken(*t) {
+		title = title + token.view()
 	}
 	return title
 }
 
-// String реализует интерфейс fmt.Stringer
-func (t *Token) String() string {
-	switch t.Type {
-	case Root:
+// view возвращает текстовое представление токена
+func (t *pathToken) view() string {
+	switch t.kind {
+	case rootToken:
 		return "^"
-	case Static:
-		return "[" + string(t.Title) + "]"
-	case CatchAll:
-		return "*" + string(t.Title)
-	case Param:
-		return ":" + string(t.Title)
+	case staticToken:
+		return "[" + string(t.title) + "]"
+	case catchAllToken:
+		return "*" + string(t.title)
+	case paramToken:
+		return ":" + string(t.title)
 	}
-	return "?" + string(t.Title)
+	return "?" + string(t.title)
 }
 
-// Decoder разбирает набор байт на токены
-type Decoder struct {
+// decoder разбирает набор байт на токены
+type decoder struct {
 	offset int
 	max    int
 	data   []byte
-	state  TokenType
+	state  tokenKind
 }
 
-// NewDecoder возвращает новый декодер адресов
-func NewDecoder(data []byte) *Decoder {
-	return &Decoder{
+// newDecoder возвращает новый декодер адресов
+func newDecoder(data []byte) *decoder {
+	return &decoder{
 		max:  len(data),
 		data: data,
 	}
 }
 
-// Tokens возвращает набор токенов и ошибку в случае если не удалось распарсить
-func (d *Decoder) Tokens() (Tokens, error) {
-	var tokens Tokens
-	var token *Token
-	err := d.PathValid()
+// tokens возвращает набор токенов и ошибку в случае если не удалось распарсить
+func (d *decoder) tokens() (pathTokens, error) {
+	var tokens pathTokens
+	var token *pathToken
+	err := d.pathValid()
 	if err != nil {
 		return tokens, err
 	}
 	for {
-		token, err = d.Token()
+		token, err = d.nextToken()
 		if err == nil {
 			tokens = append(tokens, *token)
 			continue
@@ -91,46 +107,46 @@ func (d *Decoder) Tokens() (Tokens, error) {
 	}
 }
 
-// PathValid проверяет отсутствие запрещённых символов в path
-func (d *Decoder) PathValid() error {
+// pathValid проверяет отсутствие запрещённых символов в path
+func (d *decoder) pathValid() error {
 	unvalid := bytes.IndexAny(d.data, "\r\t\n?= ")
 	if unvalid < 0 {
 		return nil
 	}
-	return fmt.Errorf(`unexpected char "%c"`, d.data[unvalid])
+	return newError(InvalidPath, `unexpected char "%c"`, d.data[unvalid])
 }
 
-// Token возвращает следующией токен
-func (d *Decoder) Token() (token *Token, err error) {
+// nextToken возвращает следующий токен
+func (d *decoder) nextToken() (token *pathToken, err error) {
 	if d.offset >= d.max {
 		return nil, io.EOF
 	}
-	if d.state == CatchAll {
-		return nil, errors.New("expected EOF")
+	if d.state == catchAllToken {
+		return nil, errExpectedEOF
 	}
-	token = &Token{}
+	token = &pathToken{}
 	switch d.data[d.offset] {
 	case ':', '*':
 		switch d.state {
-		case Static, Root:
+		case staticToken, rootToken:
 		default:
-			return nil, errors.New("expected Static token")
+			return nil, errExpectedStaticToken
 		}
 	}
 	switch d.data[d.offset] {
 	case ':':
-		token.Type = Param
-		d.state = Param
+		token.kind = paramToken
+		d.state = paramToken
 		d.offset++
 	case '*':
-		token.Type = CatchAll
-		d.state = CatchAll
+		token.kind = catchAllToken
+		d.state = catchAllToken
 		d.offset++
 	default:
-		token.Type = Static
-		d.state = Static
+		token.kind = staticToken
+		d.state = staticToken
 	}
-	token.Title, err = d.parse()
+	token.title, err = d.parse()
 	if err != nil {
 		return nil, err
 	}
@@ -138,14 +154,14 @@ func (d *Decoder) Token() (token *Token, err error) {
 }
 
 // parse возвращает название токена
-func (d *Decoder) parse() ([]byte, error) {
+func (d *decoder) parse() ([]byte, error) {
 	if d.offset >= d.max {
-		return nil, errors.New("empty token value")
+		return nil, errEmptyTokenValue
 	}
 	var end int
 
 	switch d.state {
-	case CatchAll, Param:
+	case catchAllToken, paramToken:
 		end = bytes.IndexAny(d.data[d.offset:], "/:*")
 	default:
 		end = bytes.IndexAny(d.data[d.offset:], ":*")
@@ -161,6 +177,6 @@ func (d *Decoder) parse() ([]byte, error) {
 		d.offset = d.offset + end
 		return data, nil
 	default:
-		return nil, errors.New("empty token value")
+		return nil, errEmptyTokenValue
 	}
 }

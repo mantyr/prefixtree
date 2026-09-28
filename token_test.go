@@ -60,14 +60,14 @@ func TestNodes(t *testing.T) {
 			},
 		}
 		for n, test := range tests {
-			Printf("\n\t#%d - %s ", n+1, test.path)
+			Printf("\n\t#%d - %s ", n+1, test.path) //nolint:errcheck
 			if test.expectedError != nil {
-				Printf("(error) ")
+				Printf("(error) ") //nolint:errcheck
 			}
-			d := NewDecoder([]byte(test.path))
+			d := newDecoder([]byte(test.path))
 			So(d, ShouldNotBeNil)
 
-			tokens, err := d.Tokens()
+			tokens, err := d.tokens()
 			if test.expectedError != nil {
 				So(err, ShouldNotBeNil)
 				So(
@@ -79,7 +79,7 @@ func TestNodes(t *testing.T) {
 				So(err, ShouldBeNil)
 				So(tokens, ShouldNotBeNil)
 				So(
-					tokens.String(),
+					tokens.view(),
 					ShouldResemble,
 					test.expectedPath,
 				)

@@ -10,7 +10,7 @@ import (
 
 // testSetValue проверяет вставку в дерево
 func testSetValue(
-	root *Node,
+	root *treeNode,
 	path string,
 	value string,
 	expectedError error,
@@ -30,7 +30,7 @@ func testSetValue(
 
 // testGetValue проверяет получение данных из дерева
 func testGetValue(
-	root *Node,
+	root *treeNode,
 	path string,
 	expectedError error,
 	expectedValue interface{},
@@ -46,15 +46,15 @@ func testGetValue(
 		Convey(path, func() {
 			So(err, ShouldBeNil)
 			So(value, ShouldNotBeNil)
-			So(value.Value, ShouldNotBeNil)
+			So(value.Value(), ShouldNotBeNil)
 			So(
-				value.Value,
+				value.Value(),
 				ShouldResemble,
 				expectedValue,
 			)
-			So(value.Params, ShouldNotBeNil)
+			So(value.Params().Map(), ShouldNotBeNil)
 			So(
-				value.Params,
+				value.Params().Map(),
 				ShouldResemble,
 				expectedParams,
 			)
@@ -64,9 +64,9 @@ func testGetValue(
 
 func TestNode(t *testing.T) {
 	Convey("Проверяем вставку в дерево", t, func() {
-		root := New()
+		root := newNode()
 		So(root, ShouldNotBeNil)
-		So(root.Type, ShouldEqual, Root)
+		So(root.kind, ShouldEqual, rootToken)
 
 		testSetValue(root, "/path/:dir/123", "value1", nil)
 		testSetValue(root, "/path/:dir/*filepath", "value2", nil)

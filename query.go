@@ -1,35 +1,51 @@
 package prefixtree
 
-// Query это запрос с хранением найденных параметров
-type Query struct {
+// queryParamsSize число параметров, которое поиск держит без аллокаций
+const queryParamsSize = 8
+
+// query это состояние поиска по дереву, живёт только внутри Get
+type query struct {
+	// offset позиция в path, до которой адрес уже разобран
 	offset int
-	Path   []byte
-	Params map[string]string
+
+	// path адрес запроса
+	path string
+
+	// size число найденных параметров, при откате возвращается к прежнему
+	size int
+
+	// buf первые параметры, хранятся без аллокаций
+	buf [queryParamsSize]Param
+
+	// more параметры сверх buf
+	more Params
 }
 
-// Value это значение запроса с дополнительной информацией
-type Value struct {
-	*Query
-	*Node
+// rest возвращает необработанный остаток адреса
+func (q *query) rest() string {
+	return q.path[q.offset:]
 }
 
-// NewQuery возвращает новый запрос
-func NewQuery(path []byte) *Query {
-	return &Query{
-		Path:   path,
-		Params: make(map[string]string),
+// push добавляет найденный параметр
+func (q *query) push(key, value string) {
+	p := Param{Key: key, Value: value}
+	if q.size < queryParamsSize {
+		q.buf[q.size] = p
+	} else {
+		q.more = append(q.more[:q.size-queryParamsSize], p)
 	}
+	q.size++
 }
 
-// path возвращает необработанный остаток адреса
-func (q *Query) path() []byte {
-	return q.Path[q.offset:]
+// truncate откатывает параметры до указанного числа
+func (q *query) truncate(size int) {
+	q.size = size
 }
 
-// NewValue возвращает новое значение запроса
-func NewValue(q *Query, n *Node) *Value {
-	return &Value{
-		Query: q,
-		Node:  n,
+// params возвращает найденные параметры, first и more не пересекаются
+func (q *query) params() (first, more Params) {
+	if q.size <= queryParamsSize {
+		return q.buf[:q.size], nil
 	}
+	return q.buf[:], q.more[:q.size-queryParamsSize]
 }
